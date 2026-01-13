@@ -1,159 +1,165 @@
 # Sofia Attestor Template
 
-Build your own on-chain attestation system on Sofia/Intuition.
+A template for building on-chain attestation systems on the Intuition protocol. This repo enables you to verify off-chain data (OAuth tokens, API credentials, etc.) and create on-chain attestations (triples) when verification passes.
 
-## What is an Attestor?
+## How it works
 
-An **attestor** verifies off-chain data and creates on-chain attestations (triples) on the Intuition protocol.
+1. Your app handles OAuth authentication (Twitter, GitHub, etc.)
+2. Send OAuth tokens to the Mastra workflow for verification
+3. Workflow validates tokens against provider APIs
+4. If verified → creates an on-chain triple: `[user] → [predicate] → [object]`
 
-**Example**: "Proof of Human" attestor verifies OAuth tokens from 5 platforms, then creates a triple:
+## Features
+
+- Framework-agnostic core service + React hook
+- Direct MultiVault writes or proxy-based (with fee collection)
+- Pre-configured for Intuition testnet & mainnet
+- Transaction simulation before execution
+
+## Customize
+
+1. Set your `PREDICATE_ID` and `OBJECT_ID` in `constants.ts`
+2. Implement OAuth verification logic in `mastra/workflows/attestor.ts`
+3. Optionally deploy a fee proxy contract
+
+---
+
+## Architecture
+
 ```
-[user_wallet] [is_human] [verified]
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              YOUR APPLICATION                                │
+│                                                                              │
+│   ┌──────────────────┐         ┌──────────────────┐                         │
+│   │   OAuth Flow     │         │  useAttestation  │                         │
+│   │ (Twitter/GitHub) │────────▶│   React Hook     │                         │
+│   └──────────────────┘         └────────┬─────────┘                         │
+│         User authenticates              │                                    │
+│         with providers                  │ tokens + wallet                    │
+└─────────────────────────────────────────┼───────────────────────────────────┘
+                                          │
+                                          ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        TEE (Trusted Execution Environment)                   │
+│                           e.g. Phala Network                                 │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │                         MASTRA BACKEND                                 │  │
+│  │                                                                        │  │
+│  │   ┌──────────────────┐      ┌──────────────────┐                      │  │
+│  │   │  Receive tokens  │─────▶│  Verify via APIs │                      │  │
+│  │   │  + wallet addr   │      │  (Twitter, etc.) │                      │  │
+│  │   └──────────────────┘      └────────┬─────────┘                      │  │
+│  │                                      │                                 │  │
+│  │                                      ▼                                 │  │
+│  │                           ┌──────────────────┐                        │  │
+│  │                           │ canCreateAttest: │                        │  │
+│  │                           │   true / false   │                        │  │
+│  │                           └──────────────────┘                        │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────┬───────────────────────────────────┘
+                                          │
+                                          │ verification result
+                                          ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              YOUR APPLICATION                                │
+│                                                                              │
+│   ┌──────────────────┐         ┌──────────────────┐                         │
+│   │ AttestorService  │────────▶│   User signs TX  │                         │
+│   │ (if verified)    │         │   via wallet     │                         │
+│   └──────────────────┘         └────────┬─────────┘                         │
+└─────────────────────────────────────────┼───────────────────────────────────┘
+                                          │
+                                          ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          INTUITION BLOCKCHAIN                                │
+│                                                                              │
+│   ┌──────────────────┐         ┌──────────────────┐                         │
+│   │  Sofia Fee Proxy │────────▶│    MultiVault    │                         │
+│   │   (optional)     │         │                  │                         │
+│   └──────────────────┘         └────────┬─────────┘                         │
+│                                         │                                    │
+│                                         ▼                                    │
+│                          ┌──────────────────────────┐                       │
+│                          │  Triple Created:         │                       │
+│                          │  [user] [predicate] [obj]│                       │
+│                          └──────────────────────────┘                       │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    USER BROWSER EXTENSION                    │
-│  ┌─────────────────┐                                        │
-│  │ useAttestation  │ ─── Orchestrates the full flow         │
-│  └────────┬────────┘                                        │
-└───────────┼─────────────────────────────────────────────────┘
-            │
-            │
- ───────────┼─────────────────────────────────────────────────          ▼                                                  │
-│  ┌─────────────────┐     ┌─────────────────┐                │
-│  │ Verify via API  │────▶│  Mastra Backend │                │
-│  └────────┬────────┘     │  (Workflow)     │                │
-│           │              └─────────────────┘                │
-│           ▼                                                  │
-│  ┌─────────────────┐                                        │
-│  │ User signs TX   │ ─── Creates triple on-chain            │
-│  └────────┬────────┘                                        │
-└───────────┼─────────────────────────────────────────────────┘
-            │
-            ▼
-┌─────────────────────────────────────────────────────────────┐
-│                      BLOCKCHAIN                              │
-│  ┌─────────────────┐     ┌─────────────────┐                │
-│  │ Sofia Fee Proxy │────▶│   MultiVault    │                │
-│  │ (fee handling)  │     │ (atom/triple)   │                │
-│  └─────────────────┘     └─────────────────┘                │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Quick Start
-
-### 1. Clone this template
-
-```bash
-git clone https://github.com/YOUR_USERNAME/sofia-attestor-template.git
-cd sofia-attestor-template
-```
-
-### 2. Install dependencies
-
-```bash
-# Extension (browser)
-cd extension
-pnpm install
-
-# Mastra (backend)
-cd ../mastra
-pnpm install
-```
-
-### 3. Configure your attestor
-
-1. **Define your verification logic** in `mastra/src/workflows/attestor.ts`
-2. **Update term IDs** in `extension/lib/config/constants.ts`
-3. **Configure environment** - copy `.env.example` to `.env` and fill in values
-
-### 4. Run locally
-
-```bash
-# Terminal 1: Start Mastra backend
-cd mastra
-pnpm dev
-
-# Terminal 2: Start extension dev server
-cd extension
-pnpm dev
-```
-
-### 5. Load extension in Chrome
-
-1. Open `chrome://extensions/`
-2. Enable "Developer mode"
-3. Click "Load unpacked" and select `extension/build/chrome-mv3-dev`
+---
 
 ## Project Structure
 
 ```
 sofia-attestor-template/
-├── extension/                   # Chrome Extension (Plasmo)
-│   ├── hooks/
-│   │   └── useAttestation.ts    # Main hook - CUSTOMIZE THIS
-│   ├── lib/
-│   │   ├── config/
-│   │   │   ├── chainConfig.ts   # Network selector
-│   │   │   └── constants.ts     # Term IDs - CUSTOMIZE THIS
+├── attestor-core/                 # Core library
+│   ├── src/
 │   │   ├── services/
-│   │   │   └── blockchain.ts    # Blockchain operations
-│   │   └── clients/
-│   │       └── viem.ts          # Viem + MetaMask setup
-│   └── ABI/                     # Contract ABIs
+│   │   │   └── AttestorService.ts   # Main service
+│   │   ├── hooks/
+│   │   │   └── useAttestation.ts    # React hook
+│   │   ├── config/
+│   │   │   ├── chainConfig.ts       # Network configs
+│   │   │   └── constants.ts         # Term IDs (CUSTOMIZE)
+│   │   └── abi/                     # Contract ABIs
+│   └── package.json
 │
-├── mastra/                      # Backend Workflow
+├── mastra/                        # Backend (deploy to TEE)
 │   └── src/
 │       └── workflows/
-│           └── attestor.ts      # Verification logic - CUSTOMIZE THIS
+│           └── attestor.ts        # Verification logic (CUSTOMIZE)
 │
-└── docs/                        # Documentation
-    ├── ARCHITECTURE.md
-    └── CUSTOMIZATION.md
+└── docs/                          # Documentation
 ```
 
-## Customization Guide
+## Quick Start
 
-See [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md) for a step-by-step guide on creating your own attestor.
+### 1. Install dependencies
 
-### Key files to customize:
+```bash
+pnpm install
+```
 
-| File | Purpose |
-|------|---------|
-| `mastra/src/workflows/attestor.ts` | Your verification logic (API calls, checks, etc.) |
-| `extension/lib/config/constants.ts` | Your predicate and object term IDs |
-| `extension/hooks/useAttestation.ts` | Storage keys, UI states, API endpoint |
+### 2. Configure your attestor
+
+**`attestor-core/src/config/constants.ts`**
+```typescript
+export const ATTESTOR_CONFIG = {
+  PREDICATE_ID: '0x...', // Your predicate atom ID (e.g., "is_human")
+  OBJECT_ID: '0x...',    // Your object atom ID (e.g., "verified")
+}
+```
+
+**`mastra/src/workflows/attestor.ts`**
+```typescript
+// Implement your OAuth token verification
+const verified = await verifyTwitterToken(inputData.tokens.twitter)
+```
+
+### 3. Run locally
+
+```bash
+# Terminal 1: Start Mastra backend
+cd mastra && pnpm dev
+
+# Terminal 2: Use attestor-core in your app
+```
 
 ## Deployment
 
-### Mastra Backend
+### Mastra Backend (TEE)
 
-The Mastra workflow can be deployed to:
-- **Phala Network** (TEE environment) - see `mastra/Dockerfile`
-- **Any Node.js hosting** (Vercel, Railway, etc.)
+Deploy to a Trusted Execution Environment for secure token verification:
 
-### Extension
+```bash
+cd mastra
+docker build -t attestor-backend .
+# Deploy to Phala Network or other TEE provider
+```
 
-1. Build: `cd extension && pnpm build`
-2. Package: Create a ZIP of `extension/build/chrome-mv3-prod`
-3. Submit to Chrome Web Store
+### Core Library
 
-## Requirements
-
-- Node.js 18+
-- pnpm
-- MetaMask wallet
-- ETH on Base Sepolia (testnet) or Base Mainnet
-
-## Resources
-
-- [Intuition Protocol Docs](https://docs.intuition.systems/)
-- [Sofia Extension](https://github.com/anthropics/sofia-core)
-- [Mastra Docs](https://mastra.ai/docs)
-- [Plasmo Docs](https://docs.plasmo.com/)
+Publish to npm or use locally in your application.
 
 ## License
 

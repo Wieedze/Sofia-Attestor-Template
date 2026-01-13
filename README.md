@@ -15,14 +15,14 @@ An **attestor** verifies off-chain data and creates on-chain attestations (tripl
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    YOUR APPLICATION                          │
-│         (React App, Chrome Extension, Mobile, etc.)          │
-│                                                              │
+│                    USER BROWSER EXTENSION                    │
 │  ┌─────────────────┐                                        │
-│  │  attestor-sdk   │ ─── Handles blockchain + verification   │
+│  │ useAttestation  │ ─── Orchestrates the full flow         │
 │  └────────┬────────┘                                        │
-│           │                                                  │
-│           ▼                                                  │
+└───────────┼─────────────────────────────────────────────────┘
+            │
+            │
+ ───────────┼─────────────────────────────────────────────────          ▼                                                  │
 │  ┌─────────────────┐     ┌─────────────────┐                │
 │  │ Verify via API  │────▶│  Mastra Backend │                │
 │  └────────┬────────┘     │  (Workflow)     │                │
@@ -43,30 +43,6 @@ An **attestor** verifies off-chain data and creates on-chain attestations (tripl
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Project Structure
-
-```
-sofia-attestor-template/
-├── packages/
-│   ├── attestor-sdk/           # Core SDK (framework-agnostic)
-│   │   ├── src/
-│   │   │   ├── hooks/          # React hooks (optional)
-│   │   │   ├── services/       # Blockchain service
-│   │   │   ├── config/         # Chain configuration
-│   │   │   └── abi/            # Contract ABIs
-│   │   └── package.json
-│   │
-│   └── example-app/            # Example React app
-│       └── ...
-│
-├── mastra/                     # Backend Workflow
-│   └── src/
-│       └── workflows/
-│           └── attestor.ts     # Verification logic
-│
-└── docs/                       # Documentation
-```
-
 ## Quick Start
 
 ### 1. Clone this template
@@ -79,13 +55,19 @@ cd sofia-attestor-template
 ### 2. Install dependencies
 
 ```bash
+# Extension (browser)
+cd extension
+pnpm install
+
+# Mastra (backend)
+cd ../mastra
 pnpm install
 ```
 
 ### 3. Configure your attestor
 
 1. **Define your verification logic** in `mastra/src/workflows/attestor.ts`
-2. **Update term IDs** in `packages/attestor-sdk/src/config/constants.ts`
+2. **Update term IDs** in `extension/lib/config/constants.ts`
 3. **Configure environment** - copy `.env.example` to `.env` and fill in values
 
 ### 4. Run locally
@@ -95,111 +77,83 @@ pnpm install
 cd mastra
 pnpm dev
 
-# Terminal 2: Start example app
-cd packages/example-app
+# Terminal 2: Start extension dev server
+cd extension
 pnpm dev
 ```
 
-## SDK Usage
+### 5. Load extension in Chrome
 
-### Installation
+1. Open `chrome://extensions/`
+2. Enable "Developer mode"
+3. Click "Load unpacked" and select `extension/build/chrome-mv3-dev`
 
-```bash
-pnpm add @sofia/attestor-sdk viem
+## Project Structure
+
 ```
-
-### Basic Usage (Vanilla JS/TS)
-
-```typescript
-import { AttestorService, ChainConfig } from '@sofia/attestor-sdk'
-
-// Initialize
-const attestor = new AttestorService({
-  mastraUrl: 'http://localhost:4111',
-  workflowId: 'my-attestor-workflow',
-  predicateId: '0x...', // Your predicate term ID
-  objectId: '0x...',    // Your object term ID
-  chainConfig: ChainConfig.testnet,
-})
-
-// Create attestation
-const result = await attestor.createAttestation({
-  walletAddress: '0x...',
-  verificationData: {
-    // Your custom data for verification
-  },
-})
-
-if (result.success) {
-  console.log('Attestation created:', result.txHash)
-}
-```
-
-### React Hook Usage
-
-```tsx
-import { useAttestation } from '@sofia/attestor-sdk/react'
-
-function MyComponent() {
-  const {
-    isAttested,
-    canAttest,
-    isAttesting,
-    createAttestation,
-  } = useAttestation({
-    mastraUrl: 'http://localhost:4111',
-    workflowId: 'my-attestor-workflow',
-    predicateId: '0x...',
-    objectId: '0x...',
-  })
-
-  return (
-    <button
-      onClick={createAttestation}
-      disabled={!canAttest || isAttesting}
-    >
-      {isAttesting ? 'Creating...' : 'Create Attestation'}
-    </button>
-  )
-}
+sofia-attestor-template/
+├── extension/                   # Chrome Extension (Plasmo)
+│   ├── hooks/
+│   │   └── useAttestation.ts    # Main hook - CUSTOMIZE THIS
+│   ├── lib/
+│   │   ├── config/
+│   │   │   ├── chainConfig.ts   # Network selector
+│   │   │   └── constants.ts     # Term IDs - CUSTOMIZE THIS
+│   │   ├── services/
+│   │   │   └── blockchain.ts    # Blockchain operations
+│   │   └── clients/
+│   │       └── viem.ts          # Viem + MetaMask setup
+│   └── ABI/                     # Contract ABIs
+│
+├── mastra/                      # Backend Workflow
+│   └── src/
+│       └── workflows/
+│           └── attestor.ts      # Verification logic - CUSTOMIZE THIS
+│
+└── docs/                        # Documentation
+    ├── ARCHITECTURE.md
+    └── CUSTOMIZATION.md
 ```
 
 ## Customization Guide
 
-See [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md) for a step-by-step guide.
+See [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md) for a step-by-step guide on creating your own attestor.
 
 ### Key files to customize:
 
 | File | Purpose |
 |------|---------|
-| `mastra/src/workflows/attestor.ts` | Your verification logic |
-| `packages/attestor-sdk/src/config/constants.ts` | Your term IDs |
-| `.env` | API keys, contract addresses |
+| `mastra/src/workflows/attestor.ts` | Your verification logic (API calls, checks, etc.) |
+| `extension/lib/config/constants.ts` | Your predicate and object term IDs |
+| `extension/hooks/useAttestation.ts` | Storage keys, UI states, API endpoint |
 
 ## Deployment
 
 ### Mastra Backend
 
-Deploy to any Node.js hosting:
-- **Phala Network** (TEE) - see `mastra/Dockerfile`
-- **Vercel**, **Railway**, **Fly.io**, etc.
+The Mastra workflow can be deployed to:
+- **Phala Network** (TEE environment) - see `mastra/Dockerfile`
+- **Any Node.js hosting** (Vercel, Railway, etc.)
 
-### SDK
+### Extension
 
-Publish to npm or use locally in your app.
+1. Build: `cd extension && pnpm build`
+2. Package: Create a ZIP of `extension/build/chrome-mv3-prod`
+3. Submit to Chrome Web Store
 
 ## Requirements
 
 - Node.js 18+
 - pnpm
-- Wallet (MetaMask, WalletConnect, etc.)
+- MetaMask wallet
 - ETH on Base Sepolia (testnet) or Base Mainnet
 
 ## Resources
 
 - [Intuition Protocol Docs](https://docs.intuition.systems/)
+- [Sofia Extension](https://github.com/anthropics/sofia-core)
 - [Mastra Docs](https://mastra.ai/docs)
-- [Viem Docs](https://viem.sh/)
+- [Plasmo Docs](https://docs.plasmo.com/)
 
 ## License
 

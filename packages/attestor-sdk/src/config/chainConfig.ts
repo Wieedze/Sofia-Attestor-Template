@@ -62,7 +62,6 @@ export const intuitionMainnet = defineChain({
 
 export interface ChainConfiguration {
   chain: Chain
-  chainId: number
 
   /** MultiVault contract address (required) */
   multivaultAddress: `0x${string}`
@@ -88,7 +87,6 @@ export interface ChainConfiguration {
  */
 export const testnetConfig: ChainConfiguration = {
   chain: intuitionTestnet,
-  chainId: 13579,
 
   // Intuition MultiVault on Testnet
   multivaultAddress: '0x2Ece8D4dEdcB9918A398528f3fa4688b1d2CAB91' as `0x${string}`,
@@ -106,7 +104,6 @@ export const testnetConfig: ChainConfiguration = {
  */
 export const mainnetConfig: ChainConfiguration = {
   chain: intuitionMainnet,
-  chainId: 1155,
 
   // Intuition MultiVault on Mainnet
   multivaultAddress: '0x6E35cF57A41fA15eA0EaE9C33e751b01A784Fe7e' as `0x${string}`,

@@ -18,6 +18,8 @@ export {
   ChainConfig,
   testnetConfig,
   mainnetConfig,
+  intuitionTestnet,
+  intuitionMainnet,
   GAS_CONFIG,
   getExplorerTxUrl,
   getExplorerAddressUrl,

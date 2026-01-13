@@ -7,9 +7,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import { AttestorService, type AttestorConfig, type AttestationResult } from '../services/AttestorService'
 
-export interface UseAttestationConfig extends Omit<AttestorConfig, 'chainConfig'> {
-  /** Chain config - use ChainConfig.testnet or ChainConfig.mainnet */
-  chainConfig: AttestorConfig['chainConfig']
+export interface UseAttestationConfig extends AttestorConfig {
   /** Wallet address (optional - will prompt for connection if not provided) */
   walletAddress?: `0x${string}`
   /** Storage key for persisting attestation (optional) */

@@ -70,12 +70,22 @@ export interface VerificationResult {
 // Service Implementation
 // ============================================================
 
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000000000000000000000000000' as const
+
 export class AttestorService {
   private config: AttestorConfig
   private publicClient: PublicClient
   private useProxy: boolean
 
   constructor(config: AttestorConfig) {
+    // Validate required IDs - reject zero addresses
+    if (config.predicateId === ZERO_ADDRESS) {
+      throw new Error('predicateId cannot be zero address - please configure ATTESTOR_CONFIG.PREDICATE_ID')
+    }
+    if (config.objectId === ZERO_ADDRESS) {
+      throw new Error('objectId cannot be zero address - please configure ATTESTOR_CONFIG.OBJECT_ID')
+    }
+
     this.config = config
     this.publicClient = createPublicClient({
       chain: config.chainConfig.chain,
@@ -277,51 +287,16 @@ export class AttestorService {
     walletAddress: `0x${string}`,
     atomData: `0x${string}`
   ): Promise<{ success: boolean; txHash?: string }> {
-    try {
-      const depositAmount = this.config.depositAmount || DEPOSIT_CONFIG.MIN_DEPOSIT
-      const atomCost = await this.getAtomCost()
+    const depositAmount = this.config.depositAmount || DEPOSIT_CONFIG.MIN_DEPOSIT
+    const atomCost = await this.getAtomCost()
 
-      let txHash: `0x${string}`
-
-      if (this.useProxy && this.config.chainConfig.proxyAddress) {
-        // Write through proxy (with fees)
-        const totalCost = await this.getProxyTotalCost(1, depositAmount, atomCost + depositAmount)
-
-        txHash = await walletClient.writeContract({
-          address: this.config.chainConfig.proxyAddress,
-          abi: SofiaFeeProxyAbi,
-          functionName: 'createAtoms',
-          args: [walletAddress, [atomData], [depositAmount], DEPOSIT_CONFIG.CURVE_ID],
-          value: totalCost,
-          chain: this.config.chainConfig.chain,
-          account: walletAddress,
-          ...GAS_CONFIG,
-        })
-      } else {
-        // Write directly to MultiVault (no fees)
-        const totalCost = atomCost + depositAmount
-
-        txHash = await walletClient.writeContract({
-          address: this.config.chainConfig.multivaultAddress,
-          abi: MultiVaultAbi,
-          functionName: 'createAtoms',
-          args: [[atomData], [depositAmount]],
-          value: totalCost,
-          chain: this.config.chainConfig.chain,
-          account: walletAddress,
-          ...GAS_CONFIG,
-        })
-      }
-
-      const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash })
-      return {
-        success: receipt.status === 'success',
-        txHash,
-      }
-    } catch (error) {
-      console.error('[AttestorService] Create atom error:', error)
-      return { success: false }
-    }
+    return this.executeContractWrite(walletClient, walletAddress, {
+      functionName: 'createAtoms',
+      proxyArgs: [walletAddress, [atomData], [depositAmount], DEPOSIT_CONFIG.CURVE_ID],
+      directArgs: [[atomData], [depositAmount]],
+      baseCost: atomCost,
+      depositAmount,
+    })
   }
 
   /**
@@ -332,81 +307,95 @@ export class AttestorService {
     walletAddress: `0x${string}`,
     subjectId: Address
   ): Promise<AttestationResult> {
-    try {
-      const depositAmount = this.config.depositAmount || DEPOSIT_CONFIG.MIN_DEPOSIT
-      const tripleCost = await this.getTripleCost()
+    const depositAmount = this.config.depositAmount || DEPOSIT_CONFIG.MIN_DEPOSIT
+    const tripleCost = await this.getTripleCost()
 
+    return this.executeContractWrite(walletClient, walletAddress, {
+      functionName: 'createTriples',
+      proxyArgs: [
+        walletAddress,
+        [subjectId],
+        [this.config.predicateId],
+        [this.config.objectId],
+        [depositAmount],
+        DEPOSIT_CONFIG.CURVE_ID,
+      ],
+      directArgs: [
+        [subjectId],
+        [this.config.predicateId],
+        [this.config.objectId],
+        [depositAmount],
+      ],
+      baseCost: tripleCost,
+      depositAmount,
+    })
+  }
+
+  // ============================================================
+  // Generic Contract Write Helper
+  // ============================================================
+
+  /**
+   * Execute a contract write with simulation
+   * Handles both proxy and direct MultiVault writes
+   */
+  private async executeContractWrite(
+    walletClient: WalletClient,
+    walletAddress: `0x${string}`,
+    params: {
+      functionName: 'createAtoms' | 'createTriples'
+      proxyArgs: readonly unknown[]
+      directArgs: readonly unknown[]
+      baseCost: bigint
+      depositAmount: bigint
+    }
+  ): Promise<{ success: boolean; txHash?: `0x${string}`; error?: string }> {
+    const { functionName, proxyArgs, directArgs, baseCost, depositAmount } = params
+
+    try {
       let txHash: `0x${string}`
 
       if (this.useProxy && this.config.chainConfig.proxyAddress) {
-        // Write through proxy (with fees)
-        const totalCost = await this.getProxyTotalCost(1, depositAmount, tripleCost + depositAmount)
+        const totalCost = await this.getProxyTotalCost(1, depositAmount, baseCost + depositAmount)
 
         // Simulate first
         await this.publicClient.simulateContract({
           address: this.config.chainConfig.proxyAddress,
           abi: SofiaFeeProxyAbi,
-          functionName: 'createTriples',
-          args: [
-            walletAddress,
-            [subjectId],
-            [this.config.predicateId],
-            [this.config.objectId],
-            [depositAmount],
-            DEPOSIT_CONFIG.CURVE_ID,
-          ],
+          functionName,
+          args: proxyArgs as never,
           value: totalCost,
           account: walletAddress,
         })
 
-        // Execute
         txHash = await walletClient.writeContract({
           address: this.config.chainConfig.proxyAddress,
           abi: SofiaFeeProxyAbi,
-          functionName: 'createTriples',
-          args: [
-            walletAddress,
-            [subjectId],
-            [this.config.predicateId],
-            [this.config.objectId],
-            [depositAmount],
-            DEPOSIT_CONFIG.CURVE_ID,
-          ],
+          functionName,
+          args: proxyArgs as never,
           value: totalCost,
           chain: this.config.chainConfig.chain,
           account: walletAddress,
           ...GAS_CONFIG,
         })
       } else {
-        // Write directly to MultiVault (no fees)
-        const totalCost = tripleCost + depositAmount
+        const totalCost = baseCost + depositAmount
 
         // Simulate first
         await this.publicClient.simulateContract({
           address: this.config.chainConfig.multivaultAddress,
           abi: MultiVaultAbi,
-          functionName: 'createTriples',
-          args: [
-            [subjectId],
-            [this.config.predicateId],
-            [this.config.objectId],
-            [depositAmount],
-          ],
+          functionName,
+          args: directArgs as never,
           value: totalCost,
           account: walletAddress,
         })
 
-        // Execute
         txHash = await walletClient.writeContract({
           address: this.config.chainConfig.multivaultAddress,
           abi: MultiVaultAbi,
-          functionName: 'createTriples',
-          args: [
-            [subjectId],
-            [this.config.predicateId],
-            [this.config.objectId],
-            [depositAmount],
-          ],
+          functionName,
+          args: directArgs as never,
           value: totalCost,
           chain: this.config.chainConfig.chain,
           account: walletAddress,
@@ -417,20 +406,12 @@ export class AttestorService {
       const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash })
 
       if (receipt.status !== 'success') {
-        return {
-          success: false,
-          txHash,
-          error: 'Transaction reverted on-chain',
-        }
+        return { success: false, txHash, error: 'Transaction reverted on-chain' }
       }
 
-      return {
-        success: true,
-        txHash,
-        blockNumber: receipt.blockNumber,
-      }
+      return { success: true, txHash }
     } catch (error) {
-      console.error('[AttestorService] Create triple error:', error)
+      console.error(`[AttestorService] ${functionName} error:`, error)
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -477,13 +458,13 @@ export class AttestorService {
       args: [BigInt(depositCount), totalDeposit],
     }) as bigint
 
-    const baseFee = await this.publicClient.readContract({
+    const creationFee = await this.publicClient.readContract({
       address: this.config.chainConfig.proxyAddress,
       abi: SofiaFeeProxyAbi,
-      functionName: 'baseFee',
+      functionName: 'creationFixedFee',
     }) as bigint
 
-    return multiVaultCost + depositFee + baseFee
+    return multiVaultCost + depositFee + creationFee
   }
 
   // ============================================================

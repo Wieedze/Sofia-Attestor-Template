@@ -1,0 +1,23 @@
+{
+  "name": "sofia-attestor-template",
+  "version": "0.1.0",
+  "description": "Template for building attestors on Sofia/Intuition",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "mastra"
+  ],
+  "scripts": {
+    "dev": "pnpm --parallel dev",
+    "build": "pnpm --recursive build",
+    "typecheck": "pnpm --recursive typecheck"
+  },
+  "keywords": [
+    "attestor",
+    "sofia",
+    "intuition",
+    "blockchain",
+    "web3"
+  ],
+  "license": "MIT"
+}

@@ -31,25 +31,49 @@ Before using the SDK, you need to create your predicate and object atoms on-chai
 3. Create your object atom (e.g., "verified")
 4. Note the atom IDs
 
-### Option B: Use the SDK
+### Option B: Create Atoms Programmatically
+
+You can create atoms directly via the MultiVault contract:
+
 ```typescript
-import { createPublicClient, http, stringToHex } from 'viem'
-import { baseSepolia } from 'viem/chains'
+import { createPublicClient, createWalletClient, http, stringToHex } from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
+import { intuitionTestnet, testnetConfig } from '@sofia/attestor-sdk'
 
-const client = createPublicClient({
-  chain: baseSepolia,
-  transport: http('https://sepolia.base.org'),
+const publicClient = createPublicClient({
+  chain: intuitionTestnet,
+  transport: http(testnetConfig.rpcUrl),
 })
 
-// Calculate atom ID from data
-const predicateData = stringToHex('is_human')
-const predicateId = await client.readContract({
-  address: MULTIVAULT_ADDRESS,
+const walletClient = createWalletClient({
+  chain: intuitionTestnet,
+  transport: http(testnetConfig.rpcUrl),
+  account: privateKeyToAccount('0x...'), // Your private key
+})
+
+// 1. Get the atom creation cost
+const atomCost = await publicClient.readContract({
+  address: testnetConfig.multivaultAddress,
   abi: MultiVaultAbi,
-  functionName: 'calculateAtomId',
-  args: [predicateData],
+  functionName: 'getAtomCost',
 })
+
+// 2. Create the atom on-chain
+const atomData = stringToHex('is_human') // Your atom label
+const txHash = await walletClient.writeContract({
+  address: testnetConfig.multivaultAddress,
+  abi: MultiVaultAbi,
+  functionName: 'createAtom',
+  args: [atomData],
+  value: atomCost,
+})
+
+// 3. Wait for receipt and get the atom ID from events
+const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash })
+// Parse the AtomCreated event to get the atom ID
 ```
+
+**Note:** `calculateAtomId()` only computes the hash - it does NOT create the atom. You must call `createAtom()` to actually create it on-chain.
 
 ## Step 3: Update Constants
 
@@ -168,33 +192,38 @@ const verifyAttestation = createStep({
 
 ### Without Proxy (Direct MultiVault)
 
-Edit `packages/attestor-sdk/src/config/chainConfig.ts`:
+By default, the SDK writes directly to the MultiVault contract. This is the simplest setup:
 
 ```typescript
+// packages/attestor-sdk/src/config/chainConfig.ts
 export const mainnetConfig: ChainConfiguration = {
-  chain: base,
-  chainId: 8453,
-  multivaultAddress: '0x430BbF52503Bd4801E51182f4cB9f8F534225DE5' as `0x${string}`,
-  // No proxyAddress = direct writes to MultiVault
-  rpcUrl: 'https://mainnet.base.org',
-  explorerUrl: 'https://basescan.org',
+  chain: intuitionMainnet,
+  chainId: 1155,
+  multivaultAddress: '0x6E35cF57A41fA15eA0EaE9C33e751b01A784Fe7e' as `0x${string}`,
+  // No proxyAddress = direct writes to MultiVault (no platform fees)
+  rpcUrl: 'https://rpc.intuition.systems',
+  explorerUrl: 'https://explorer.intuition.systems',
+  graphqlEndpoint: 'https://mainnet.intuition.sh/v1/graphql',
 }
 ```
 
 ### With Proxy (Fee Collection)
 
-If you want to collect fees, deploy your own proxy contract and configure it:
+If you want to collect platform fees, deploy your own proxy contract and configure it:
 
 ```typescript
 export const mainnetConfig: ChainConfiguration = {
-  chain: base,
-  chainId: 8453,
-  multivaultAddress: '0x430BbF52503Bd4801E51182f4cB9f8F534225DE5' as `0x${string}`,
+  chain: intuitionMainnet,
+  chainId: 1155,
+  multivaultAddress: '0x6E35cF57A41fA15eA0EaE9C33e751b01A784Fe7e' as `0x${string}`,
   proxyAddress: '0xYourProxyAddress' as `0x${string}`, // Your deployed proxy
-  rpcUrl: 'https://mainnet.base.org',
-  explorerUrl: 'https://basescan.org',
+  rpcUrl: 'https://rpc.intuition.systems',
+  explorerUrl: 'https://explorer.intuition.systems',
+  graphqlEndpoint: 'https://mainnet.intuition.sh/v1/graphql',
 }
 ```
+
+See the [Sofia Fee Proxy Template](https://github.com/0xIntuition/sofia-fee-proxy) for proxy deployment instructions.
 
 ## Step 6: Use in Your App
 

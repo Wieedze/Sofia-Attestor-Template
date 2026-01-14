@@ -2,10 +2,6 @@
  * Chain Configuration
  *
  * Defines network configurations for Intuition testnet and mainnet.
- *
- * NOTE: The proxy is OPTIONAL. If you don't set proxyAddress,
- * the SDK will write directly to the MultiVault contract.
- * Use a proxy if you want to collect fees or add custom logic.
  */
 
 import { defineChain, type Chain } from 'viem'
@@ -62,17 +58,8 @@ export const intuitionMainnet = defineChain({
 
 export interface ChainConfiguration {
   chain: Chain
-
-  /** MultiVault contract address (required) */
+  /** MultiVault contract address */
   multivaultAddress: `0x${string}`
-
-  /**
-   * Optional: Fee proxy address.
-   * If not set, writes directly to MultiVault (no platform fees).
-   * If set, writes go through the proxy which can collect fees.
-   */
-  proxyAddress?: `0x${string}`
-
   rpcUrl: string
   explorerUrl: string
   graphqlEndpoint: string
@@ -87,13 +74,7 @@ export interface ChainConfiguration {
  */
 export const testnetConfig: ChainConfiguration = {
   chain: intuitionTestnet,
-
-  // Intuition MultiVault on Testnet
   multivaultAddress: '0x2Ece8D4dEdcB9918A398528f3fa4688b1d2CAB91' as `0x${string}`,
-
-  // Optional: Set your proxy address if you deploy one
-  // proxyAddress: '0x...' as `0x${string}`,
-
   rpcUrl: 'https://testnet.rpc.intuition.systems',
   explorerUrl: 'https://testnet.explorer.intuition.systems',
   graphqlEndpoint: 'https://testnet.intuition.sh/v1/graphql',
@@ -104,13 +85,7 @@ export const testnetConfig: ChainConfiguration = {
  */
 export const mainnetConfig: ChainConfiguration = {
   chain: intuitionMainnet,
-
-  // Intuition MultiVault on Mainnet
   multivaultAddress: '0x6E35cF57A41fA15eA0EaE9C33e751b01A784Fe7e' as `0x${string}`,
-
-  // Optional: Set your proxy address if you deploy one
-  // proxyAddress: '0x...' as `0x${string}`,
-
   rpcUrl: 'https://rpc.intuition.systems',
   explorerUrl: 'https://explorer.intuition.systems',
   graphqlEndpoint: 'https://mainnet.intuition.sh/v1/graphql',

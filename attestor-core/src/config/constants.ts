@@ -11,7 +11,7 @@
  * These are the on-chain atom IDs that represent your predicate and object
  *
  * Example for "Proof of Human":
- * - PREDICATE_ID = "is_human" atom ID
+ * - PREDICATE_ID = "socials_platform" atom ID
  * - OBJECT_ID = "verified" atom ID
  *
  * You can create these atoms using the Intuition API or directly on-chain
@@ -45,4 +45,34 @@ export const APPROVAL_TYPE = {
   DEPOSIT: 1,    // Allow deposits on behalf of user
   REDEEM: 2,     // Allow redemptions on behalf of user
   BOTH: 3,       // Allow both
+} as const
+
+/**
+ * Gas limits for bot-pays model
+ * These values are tested and working on Intuition Mainnet
+ */
+export const GAS_LIMITS = {
+  ATOM_CREATION: 500000n,
+  TRIPLE_CREATION: 800000n,
+} as const
+
+/**
+ * Deposit amounts for bot-pays model
+ * These values ensure sufficient balance for all fees
+ */
+export const BOT_DEPOSIT_CONFIG = {
+  // Deposit when creating user atom (2 TRUST)
+  ATOM_DEPOSIT: 2000000000000000000n,
+  // Extra deposit for triple creation to cover fees (0.5 TRUST)
+  TRIPLE_EXTRA: 500000000000000000n,
+} as const
+
+/**
+ * OAuth verification configuration
+ */
+export const OAUTH_CONFIG = {
+  // Default verification threshold (number of platforms that must be verified)
+  DEFAULT_THRESHOLD: 5,
+  // Platforms supported
+  PLATFORMS: ['youtube', 'spotify', 'discord', 'twitch', 'twitter'] as const,
 } as const

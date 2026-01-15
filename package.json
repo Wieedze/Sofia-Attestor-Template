@@ -1,10 +1,10 @@
 {
-  "name": "sofia-attestor-template",
+  "name": "sofia-verifier-template",
   "version": "0.1.0",
-  "description": "Template for building attestors on Sofia/Intuition",
+  "description": "Template for building social verifiers on Sofia/Intuition",
   "private": true,
   "workspaces": [
-    "packages/*",
+    "verifier-core",
     "mastra"
   ],
   "scripts": {
@@ -13,6 +13,7 @@
     "typecheck": "pnpm --recursive typecheck"
   },
   "keywords": [
+    "verifier",
     "attestor",
     "sofia",
     "intuition",

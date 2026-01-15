@@ -1,7 +1,7 @@
 {
-  "name": "@sofia/attestor-core",
+  "name": "@sofia/verifier-core",
   "version": "0.1.0",
-  "description": "Core library for building attestors on Sofia/Intuition",
+  "description": "Core library for building social verifiers on Sofia/Intuition",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
@@ -44,6 +44,7 @@
     "src"
   ],
   "keywords": [
+    "verifier",
     "attestor",
     "sofia",
     "intuition",

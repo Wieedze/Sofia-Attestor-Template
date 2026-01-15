@@ -5,10 +5,10 @@
  */
 
 import { Mastra } from '@mastra/core'
-import { attestorWorkflow } from './workflows/attestor'
+import { verifierWorkflow } from './workflows/verifier'
 
 export const mastra = new Mastra({
   workflows: {
-    attestorWorkflow,
+    verifierWorkflow,
   },
 })

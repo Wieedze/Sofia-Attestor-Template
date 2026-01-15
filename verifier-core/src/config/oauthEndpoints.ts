@@ -1,3 +1,4 @@
+
 /**
  * OAuth Endpoints for Token Verification
  *
@@ -31,14 +32,21 @@ export const OAUTH_ENDPOINTS = {
 
 export type OAuthPlatform = keyof typeof OAUTH_ENDPOINTS
 
+export interface OAuthVerificationResult {
+  valid: boolean
+  userId?: string
+  username?: string
+  error?: string
+}
+
 /**
- * Verify a single OAuth token against its platform API
+ * Verify OAuth token and retrieve user ID
  */
-export async function verifyOAuthToken(
+export async function verifyAndGetUserId(
   platform: OAuthPlatform,
   token: string,
   clientId?: string
-): Promise<boolean> {
+): Promise<OAuthVerificationResult> {
   const endpoint = OAUTH_ENDPOINTS[platform]
 
   try {
@@ -46,21 +54,74 @@ export async function verifyOAuthToken(
       Authorization: endpoint.authHeader(token),
     }
 
-    // Twitch requires Client-Id header
     if (platform === 'twitch') {
       if (!clientId) {
-        console.warn(`[OAuth] ${platform}: Client ID required but not provided`)
-        return false
+        return { valid: false, error: 'Twitch Client ID required' }
       }
       headers['Client-Id'] = clientId
     }
 
     const response = await fetch(endpoint.url, { headers })
-    return response.ok
+
+    if (!response.ok) {
+      return { valid: false, error: `API returned ${response.status}` }
+    }
+
+    const data = await response.json()
+
+    // Extract userId based on platform
+    let userId: string | undefined
+    let username: string | undefined
+
+    switch (platform) {
+      case 'discord':
+        // Discord: { id: "123456789", username: "user" }
+        userId = data.id
+        username = data.username
+        break
+      case 'youtube':
+        // YouTube: { items: [{ id: "UCxxxxx", snippet: { title: "Channel Name" } }] }
+        userId = data.items?.[0]?.id
+        username = data.items?.[0]?.snippet?.title
+        break
+      case 'spotify':
+        // Spotify: { id: "user123", display_name: "User Name" }
+        userId = data.id
+        username = data.display_name
+        break
+      case 'twitch':
+        // Twitch: { data: [{ id: "123456", login: "username" }] }
+        userId = data.data?.[0]?.id
+        username = data.data?.[0]?.login
+        break
+      case 'twitter':
+        // Twitter: { data: { id: "123456789", username: "user" } }
+        userId = data.data?.id
+        username = data.data?.username
+        break
+    }
+
+    if (!userId) {
+      return { valid: false, error: 'Could not extract user ID from response' }
+    }
+
+    return { valid: true, userId, username }
   } catch (error) {
     console.error(`[OAuth] ${platform}: Verification failed:`, error)
-    return false
+    return { valid: false, error: error instanceof Error ? error.message : 'Unknown error' }
   }
+}
+
+/**
+ * Verify a single OAuth token (simple boolean check)
+ */
+export async function verifyOAuthToken(
+  platform: OAuthPlatform,
+  token: string,
+  clientId?: string
+): Promise<boolean> {
+  const result = await verifyAndGetUserId(platform, token, clientId)
+  return result.valid
 }
 
 /**

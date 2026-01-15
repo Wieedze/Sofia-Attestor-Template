@@ -1,28 +1,65 @@
-# Sofia Attestor Template
+# Sofia Verifier Template
 
-A template for building on-chain attestation systems on the Intuition protocol. This repo enables you to verify off-chain data (OAuth tokens, API credentials, etc.) and create on-chain attestations (triples) when verification passes.
+A template for building on-chain social verification systems on the Intuition protocol. This repo enables you to verify social accounts (Discord, YouTube, Spotify, Twitch, Twitter) via OAuth and create on-chain triples linking wallets to verified social IDs.
 
 ## How it works
 
-1. Your app handles OAuth authentication (Twitter, GitHub, etc.)
-2. Send OAuth tokens to the Mastra workflow for verification
-3. Workflow validates tokens against provider APIs
-4. If verified → creates an on-chain triple: `[user] → [predicate] → [object]`
+1. User authenticates with a social platform (Discord, YouTube, etc.)
+2. Frontend sends OAuth token + wallet address to the Mastra workflow
+3. Workflow verifies the token and extracts the user's social ID
+4. If verified → creates on-chain triple: `[wallet] → [has verified {platform} id] → [userId]`
+5. Bot wallet pays all transaction fees (user doesn't need to sign)
 
 ## Features
 
-- Framework-agnostic core service + React hook
-- Direct MultiVault writes or proxy-based (with fee collection)
-- Pre-configured for Intuition testnet & mainnet
-- Transaction simulation before execution
+- **Bot-pays model**: Users don't need to sign transactions or pay gas
+- **IPFS pinning**: Social IDs are pinned to IPFS for correct atom labels
+- **5 platforms supported**: Discord, YouTube, Spotify, Twitch, Twitter
+- **Testnet & mainnet**: Environment variable to switch networks
+- **Framework-agnostic**: Core SDK + React hooks available
 
-## Customize
+## Quick Start
 
-1. Set your `PREDICATE_ID` and `OBJECT_ID` in `constants.ts`
-2. Implement OAuth verification logic in `mastra/workflows/attestor.ts`
-3. Optionally deploy a fee proxy contract
+### 1. Install dependencies
 
----
+```bash
+pnpm install
+```
+
+### 2. Configure environment
+
+Create `.env` in the `mastra/` directory:
+
+```bash
+# Network: "testnet" or "mainnet"
+NETWORK=testnet
+
+# Bot wallet private key (this wallet pays for all transactions)
+BOT_PRIVATE_KEY=0x...
+
+# Optional: Platform-specific credentials
+TWITCH_CLIENT_ID=your_twitch_client_id
+```
+
+### 3. Run locally
+
+```bash
+cd mastra && pnpm dev
+```
+
+### 4. Test the workflow
+
+```bash
+curl -X POST http://localhost:4111/api/workflows/verifierWorkflow/start-async \
+  -H "Content-Type: application/json" \
+  -d '{
+    "inputData": {
+      "walletAddress": "0xYourWalletAddress",
+      "platform": "discord",
+      "oauthToken": "your_oauth_access_token"
+    }
+  }'
+```
 
 ## Architecture
 
@@ -31,11 +68,11 @@ A template for building on-chain attestation systems on the Intuition protocol. 
 │                              YOUR APPLICATION                                │
 │                                                                              │
 │   ┌──────────────────┐         ┌──────────────────┐                         │
-│   │   OAuth Flow     │         │  useAttestation  │                         │
-│   │ (Twitter/GitHub) │────────▶│   React Hook     │                         │
+│   │   OAuth Flow     │         │  useVerification │                         │
+│   │ (Discord/YouTube)│────────▶│   React Hook     │                         │
 │   └──────────────────┘         └────────┬─────────┘                         │
 │         User authenticates              │                                    │
-│         with providers                  │ tokens + wallet                    │
+│         with platform                   │ token + wallet                     │
 └─────────────────────────────────────────┼───────────────────────────────────┘
                                           │
                                           ▼
@@ -46,104 +83,102 @@ A template for building on-chain attestation systems on the Intuition protocol. 
 │  │                         MASTRA BACKEND                                 │  │
 │  │                                                                        │  │
 │  │   ┌──────────────────┐      ┌──────────────────┐                      │  │
-│  │   │  Receive tokens  │─────▶│  Verify via APIs │                      │  │
-│  │   │  + wallet addr   │      │  (Twitter, etc.) │                      │  │
+│  │   │  Receive token   │─────▶│  Verify via API  │                      │  │
+│  │   │  + wallet addr   │      │  (Discord, etc.) │                      │  │
 │  │   └──────────────────┘      └────────┬─────────┘                      │  │
 │  │                                      │                                 │  │
 │  │                                      ▼                                 │  │
-│  │                           ┌──────────────────┐                        │  │
-│  │                           │ canCreateAttest: │                        │  │
-│  │                           │   true / false   │                        │  │
-│  │                           └──────────────────┘                        │  │
+│  │   ┌──────────────────┐      ┌──────────────────┐                      │  │
+│  │   │  Pin to IPFS     │─────▶│  Create atoms &  │                      │  │
+│  │   │  (userId label)  │      │  triple on-chain │                      │  │
+│  │   └──────────────────┘      └────────┬─────────┘                      │  │
+│  │                                      │                                 │  │
+│  │                           Bot wallet signs & pays                      │  │
 │  └───────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────┬───────────────────────────────────┘
-                                          │
-                                          │ verification result
-                                          ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              YOUR APPLICATION                                │
-│                                                                              │
-│   ┌──────────────────┐         ┌──────────────────┐                         │
-│   │ AttestorService  │────────▶│   User signs TX  │                         │
-│   │ (if verified)    │         │   via wallet     │                         │
-│   └──────────────────┘         └────────┬─────────┘                         │
-└─────────────────────────────────────────┼───────────────────────────────────┘
                                           │
                                           ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                          INTUITION BLOCKCHAIN                                │
 │                                                                              │
-│   ┌──────────────────┐         ┌──────────────────┐                         │
-│   │  Sofia Fee Proxy │────────▶│    MultiVault    │                         │
-│   │   (optional)     │         │                  │                         │
-│   └──────────────────┘         └────────┬─────────┘                         │
-│                                         │                                    │
-│                                         ▼                                    │
-│                          ┌──────────────────────────┐                       │
-│                          │  Triple Created:         │                       │
-│                          │  [user] [predicate] [obj]│                       │
-│                          └──────────────────────────┘                       │
+│   ┌──────────────────────────────────────────────────────────────────────┐  │
+│   │                           MultiVault                                  │  │
+│   │                                                                       │  │
+│   │   Triple Created:                                                     │  │
+│   │   [0xWallet] [has verified discord id] [userId]                      │  │
+│   │                                                                       │  │
+│   │   Atoms created (if needed):                                          │  │
+│   │   - Wallet atom (address as bytes)                                    │  │
+│   │   - Predicate atom ("has verified discord id")                        │  │
+│   │   - Social atom (IPFS URI with userId as label)                       │  │
+│   └──────────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
-
----
 
 ## Project Structure
 
 ```
-sofia-attestor-template/
-├── attestor-core/                 # Core library
+sofia-verifier-template/
+├── verifier-core/                # SDK/Library for frontend integration
 │   ├── src/
 │   │   ├── services/
-│   │   │   └── AttestorService.ts   # Main service
+│   │   │   └── BotVerifierService.ts   # Client service
 │   │   ├── hooks/
-│   │   │   └── useAttestation.ts    # React hook
+│   │   │   └── useVerification.ts      # React hook
 │   │   ├── config/
-│   │   │   ├── chainConfig.ts       # Network configs
-│   │   │   └── constants.ts         # Term IDs (CUSTOMIZE)
-│   │   └── abi/                     # Contract ABIs
+│   │   │   ├── chainConfig.ts          # Network configs
+│   │   │   └── constants.ts            # Predicates & config
+│   │   └── index.ts                    # Exports
 │   └── package.json
 │
-├── mastra/                        # Backend (deploy to TEE)
+├── mastra/                       # Backend server (deploy to TEE)
 │   └── src/
-│       └── workflows/
-│           └── attestor.ts        # Verification logic (CUSTOMIZE)
+│       └── mastra/
+│           ├── index.ts              # Mastra entry point
+│           └── workflows/
+│               └── verifier.ts       # Main verification workflow
 │
-└── docs/                          # Documentation
+├── docs/                         # Documentation
+│   ├── ARCHITECTURE.md
+│   └── CUSTOMIZATION.md
+│
+└── README.md
 ```
 
-## Quick Start
+## Supported Platforms
 
-### 1. Install dependencies
+| Platform | OAuth Endpoint | User ID Field |
+|----------|---------------|---------------|
+| Discord | `discord.com/api/users/@me` | `id` |
+| YouTube | `youtube.googleapis.com/youtube/v3/channels` | `items[0].id` |
+| Spotify | `api.spotify.com/v1/me` | `id` |
+| Twitch | `api.twitch.tv/helix/users` | `data[0].id` |
+| Twitter | `api.twitter.com/2/users/me` | `data.id` |
 
-```bash
-pnpm install
+## Triple Structure
+
+Each verification creates a triple with this structure:
+
+```
+Subject:   Wallet address (as bytes)
+Predicate: "has verified {platform} id"
+Object:    Social user ID (pinned to IPFS for correct label)
 ```
 
-### 2. Configure your attestor
+Example predicates:
+- `has verified discord id`
+- `has verified youtube id`
+- `has verified spotify id`
+- `has verified twitch id`
+- `has verified twitter id`
 
-**`attestor-core/src/config/constants.ts`**
-```typescript
-export const ATTESTOR_CONFIG = {
-  PREDICATE_ID: '0x...', // Your predicate atom ID (e.g., "is_human")
-  OBJECT_ID: '0x...',    // Your object atom ID (e.g., "verified")
-}
-```
+## Customization
 
-**`mastra/src/workflows/attestor.ts`**
-```typescript
-// Implement your OAuth token verification
-const verified = await verifyTwitterToken(inputData.tokens.twitter)
-```
-
-### 3. Run locally
-
-```bash
-# Terminal 1: Start Mastra backend
-cd mastra && pnpm dev
-
-# Terminal 2: Use attestor-core in your app
-```
+See [docs/CUSTOMIZATION.md](docs/CUSTOMIZATION.md) for:
+- Adding new platforms
+- Changing predicate names
+- Modifying deposit amounts
+- Custom verification logic
 
 ## Deployment
 
@@ -153,13 +188,24 @@ Deploy to a Trusted Execution Environment for secure token verification:
 
 ```bash
 cd mastra
-docker build -t attestor-backend .
+docker build -t verifier-backend .
 # Deploy to Phala Network or other TEE provider
 ```
 
-### Core Library
+### Environment Variables
 
-Publish to npm or use locally in your application.
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `NETWORK` | Yes | `testnet` or `mainnet` |
+| `BOT_PRIVATE_KEY` | Yes | Private key for bot wallet |
+| `TWITCH_CLIENT_ID` | No | Required for Twitch verification |
+
+## Networks
+
+| Network | Chain ID | RPC | Explorer |
+|---------|----------|-----|----------|
+| Mainnet | 1155 | `https://rpc.intuition.systems` | `https://explorer.intuition.systems` |
+| Testnet | 13579 | `https://testnet.rpc.intuition.systems` | `https://testnet.explorer.intuition.systems` |
 
 ## License
 

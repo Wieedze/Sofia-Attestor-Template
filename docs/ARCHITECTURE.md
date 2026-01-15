@@ -1,216 +1,228 @@
 # Architecture
 
+This document explains the technical architecture of the Sofia Verifier Template.
+
 ## Overview
 
-The Sofia Attestor Template provides a framework for building on-chain attestation systems on the Intuition protocol.
+The verifier system consists of two main components:
 
-## Flow Diagram
-
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│                         YOUR APPLICATION                                │
-│                  (Web App, Mobile, Extension, etc.)                     │
-│                                                                         │
-│  ┌──────────────────────────────────────────────────────────────────┐  │
-│  │                      AttestorService / useAttestation            │  │
-│  │                                                                  │  │
-│  │  1. User initiates attestation                                   │  │
-│  │  2. Call Mastra API to verify off-chain data                     │  │
-│  │  3. If verified, prompt user to sign transaction                 │  │
-│  │  4. Create triple on-chain                                       │  │
-│  └────────────────────────────────────────────────────────────────┬─┘  │
-│                                                                    │    │
-└────────────────────────────────────────────────────────────────────┼────┘
-                                                                     │
-                    ┌────────────────────────────────────────────────┼────┐
-                    │                                                │    │
-                    ▼                                                ▼    │
-┌─────────────────────────────┐          ┌───────────────────────────────┐
-│     MASTRA BACKEND          │          │         BLOCKCHAIN            │
-│                             │          │                               │
-│  ┌───────────────────────┐  │          │  ┌─────────────────────────┐  │
-│  │  attestorWorkflow     │  │          │  │    Sofia Fee Proxy      │  │
-│  │                       │  │          │  │                         │  │
-│  │  - Verify tokens      │  │          │  │  - Calculate fees       │  │
-│  │  - Check APIs         │  │          │  │  - Forward to MultiVault│  │
-│  │  - Return result      │  │          │  └───────────┬─────────────┘  │
-│  └───────────────────────┘  │          │              │                │
-│                             │          │              ▼                │
-│  Returns:                   │          │  ┌─────────────────────────┐  │
-│  {                          │          │  │      MultiVault         │  │
-│    canCreateAttestation,    │          │  │                         │  │
-│    verified: {...}          │          │  │  - Create atoms         │  │
-│  }                          │          │  │  - Create triples       │  │
-│                             │          │  │  - Manage deposits      │  │
-└─────────────────────────────┘          │  └─────────────────────────┘  │
-                                         │                               │
-                                         └───────────────────────────────┘
-```
-
-## Components
-
-### 1. AttestorService (SDK)
-
-The core service that orchestrates the attestation flow:
-
-```typescript
-const attestor = new AttestorService({
-  mastraUrl: 'https://your-api.com',
-  workflowId: 'attestor-workflow',
-  predicateId: '0x...',
-  objectId: '0x...',
-  chainConfig: ChainConfig.mainnet,
-})
-```
-
-**Responsibilities:**
-- Call Mastra API for verification
-- Check and request proxy approval
-- Create user atom if needed
-- Create the attestation triple
-- Handle errors and retries
-
-### 2. Mastra Workflow (Backend)
-
-The verification logic runs on your backend:
-
-```typescript
-const verifyAttestation = createStep({
-  id: 'verify-attestation',
-  execute: async ({ inputData }) => {
-    // Verify OAuth tokens, API keys, etc.
-    return { canCreateAttestation: true }
-  },
-})
-```
-
-**Responsibilities:**
-- Verify off-chain data (tokens, APIs, etc.)
-- Return verification status
-- No blockchain interaction (user signs TX)
-
-### 3. Smart Contracts
-
-**Sofia Fee Proxy:**
-- Collects platform fees
-- Forwards transactions to MultiVault
-- User must approve proxy first
-
-**MultiVault:**
-- Creates atoms (identities)
-- Creates triples (claims)
-- Manages share deposits
+1. **Mastra Backend** - Server-side workflow that verifies OAuth tokens and creates on-chain triples
+2. **Verifier SDK** - Client library for frontend integration (optional)
 
 ## Data Flow
 
-### Step 1: User Initiates Attestation
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Frontend  │────▶│   Mastra    │────▶│    IPFS     │────▶│  Intuition  │
+│   (OAuth)   │     │  Workflow   │     │   Pinning   │     │  MultiVault │
+└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+      │                   │                   │                   │
+      │ 1. OAuth token    │ 2. Verify token   │ 3. Pin userId     │ 4. Create
+      │    + wallet       │    via API        │    to IPFS        │    triple
+      │                   │                   │                   │
+      ▼                   ▼                   ▼                   ▼
+   User auth          Extract userId      Get IPFS URI        On-chain
+   with Discord       from response       for label           attestation
+```
+
+## Triple Structure
+
+Each verification creates an Intuition triple:
+
+```
+Subject:   [Wallet Address]
+Predicate: [has verified {platform} id]
+Object:    [Social User ID]
+```
+
+### Atom Creation
+
+The workflow creates up to 3 atoms if they don't exist:
+
+1. **Wallet Atom**
+   - Data: Wallet address as lowercase hex bytes
+   - Example: `0x1234...abcd`
+
+2. **Predicate Atom**
+   - Data: String like "has verified discord id"
+   - Created once per platform, reused for all users
+
+3. **Social Atom**
+   - Data: IPFS URI from pinning
+   - The `name` field in IPFS metadata becomes the visible label
+   - This ensures the atom shows the userId, not "json object"
+
+### IPFS Pinning
+
+Social atoms use IPFS pinning to ensure correct labels:
 
 ```typescript
-const result = await attestor.createAttestation({
-  walletAddress: '0x...',
-  verificationData: { tokens: { twitter: '...' } },
-})
-```
-
-### Step 2: Verify via Mastra
-
-```
-POST /api/workflows/attestor-workflow/start-async
-{
-  "inputData": {
-    "walletAddress": "0x...",
-    "tokens": { "twitter": "..." }
+// Pin to IPFS with userId as the name
+const mutation = `
+  mutation PinThing($thing: PinThingInput!) {
+    pinThing(thing: $thing) {
+      uri
+    }
   }
-}
+`;
+
+const variables = {
+  thing: {
+    name: userId,           // This becomes the visible label
+    description: "Verified discord account ID",
+    image: "",
+    url: ""
+  }
+};
 ```
 
-Response:
-```json
-{
-  "success": true,
-  "canCreateAttestation": true,
-  "verified": { "twitter": true }
-}
-```
+The returned IPFS URI (e.g., `ipfs://Qm...`) is used as the atom data.
 
-### Step 3: Request Proxy Approval (if needed)
+## Bot-Pays Model
 
-```solidity
-multiVault.approve(proxyAddress, DEPOSIT_TYPE)
-```
+Unlike traditional attestation systems where users sign transactions:
 
-### Step 4: Create User Atom (if needed)
+1. User provides OAuth token + wallet address
+2. Bot wallet verifies and creates the triple
+3. Bot pays all gas fees
+4. User's wallet is recorded but never signs
 
-```solidity
-proxy.createAtoms(receiver, [atomData], [deposit], curveId)
-```
+This improves UX by removing wallet signature requirements.
 
-### Step 5: Create Triple
+## Deposit Amounts
 
-```solidity
-proxy.createTriples(
-  receiver,
-  [userAtomId],      // Subject: user
-  [predicateId],     // Predicate: "is_human", etc.
-  [objectId],        // Object: "verified", etc.
-  [deposit],
-  curveId
-)
-```
+Each atom and triple requires a deposit:
 
-## On-Chain Data Structure
-
-### Atoms
-
-Atoms are identities on the Intuition protocol:
-- User atoms (wallet addresses)
-- Concept atoms ("is_human", "verified", etc.)
-
-### Triples
-
-Triples are claims in the format:
-```
-[Subject] [Predicate] [Object]
-```
-
-Example:
-```
-[0x1234...] [is_human] [verified]
-```
-
-This creates an on-chain attestation that wallet `0x1234...` is a verified human.
-
-## Fee Structure
-
-### Sofia Fee Proxy
-- Base fee: Fixed amount per transaction
-- Deposit fee: Percentage of deposit amount
-
-### MultiVault (Intuition)
-- Atom creation fee
-- Triple creation fee
-- Entry/exit fees for deposits
-
-Total cost calculation:
 ```typescript
-const totalCost = multiVaultCost + depositFee + baseFee
+const ATOM_DEPOSIT = 500000000000000000n  // 0.5 TRUST
+const TRIPLE_EXTRA = 500000000000000000n  // 0.5 TRUST additional
+```
+
+For a new verification with all new atoms:
+- Wallet atom: 0.5 TRUST
+- Predicate atom: 0.5 TRUST (or 0 if exists)
+- Social atom: 0.5 TRUST
+- Triple creation: 0.5 TRUST extra
+- **Total**: Up to 2 TRUST per verification
+
+## Network Configuration
+
+The workflow supports both testnet and mainnet via environment variable:
+
+```typescript
+const isTestnet = process.env.NETWORK === 'testnet'
+
+// Testnet
+Chain ID: 13579
+RPC: https://testnet.rpc.intuition.systems
+MultiVault: 0x2Ece8D4dEdcB9918A398528f3fa4688b1d2CAB91
+GraphQL: https://testnet.intuition.sh/v1/graphql
+
+// Mainnet
+Chain ID: 1155
+RPC: https://rpc.intuition.systems
+MultiVault: 0x6E35cF57A41fA15eA0EaE9C33e751b01A784Fe7e
+GraphQL: https://mainnet.intuition.sh/v1/graphql
 ```
 
 ## Security Considerations
 
-1. **Proxy Approval**: Users must explicitly approve the proxy to deposit on their behalf
-2. **Simulation**: All transactions are simulated before execution
-3. **Receipt Verification**: TX receipts are checked for success status
-4. **Off-chain Verification**: Sensitive data is verified server-side
+### TEE Deployment
 
-## Deployment Options
+The Mastra backend should be deployed in a Trusted Execution Environment (TEE) like Phala Network:
 
-### Mastra Backend
-- Phala Network (TEE for sensitive data)
-- Vercel/Railway/Fly.io
-- Self-hosted Node.js
+- OAuth tokens are sensitive and should not be exposed
+- Bot private key must be protected
+- TEE provides hardware-level isolation
 
-### Frontend
-- Web app (React, Next.js, etc.)
-- Chrome extension
-- Mobile app (React Native)
+### Token Validation
+
+Each platform's OAuth token is validated against its official API:
+
+```typescript
+// Discord example
+const response = await fetch('https://discord.com/api/users/@me', {
+  headers: { Authorization: `Bearer ${token}` }
+})
+```
+
+Invalid or expired tokens are rejected before any on-chain action.
+
+## Verifier SDK (Optional)
+
+The `verifier-core` package provides:
+
+### BotVerifierService
+
+A service class for calling the Mastra workflow:
+
+```typescript
+import { BotVerifierService } from '@sofia/verifier-core'
+
+const service = new BotVerifierService({
+  apiEndpoint: 'https://your-mastra-server.com'
+})
+
+const result = await service.createVerification({
+  walletAddress: '0x...',
+  platform: 'discord',
+  oauthToken: 'token...'
+})
+```
+
+### useVerification Hook (React)
+
+A React hook for frontend integration:
+
+```typescript
+import { useVerification } from '@sofia/verifier-core/react'
+
+function VerifyButton() {
+  const { isVerifying, createVerification } = useVerification({
+    apiEndpoint: 'https://your-mastra-server.com'
+  })
+
+  return (
+    <button
+      onClick={() => createVerification({
+        walletAddress: '0x...',
+        platform: 'discord',
+        oauthToken: 'token...'
+      })}
+      disabled={isVerifying}
+    >
+      {isVerifying ? 'Verifying...' : 'Verify Discord'}
+    </button>
+  )
+}
+```
+
+## Error Handling
+
+The workflow returns structured errors:
+
+```typescript
+// Success
+{
+  success: true,
+  platform: "discord",
+  userId: "123456789",
+  txHash: "0x...",
+  explorerUrl: "https://explorer.intuition.systems/triple/42"
+}
+
+// OAuth failure
+{
+  success: false,
+  platform: "discord",
+  error: "OAuth verification failed: Invalid token"
+}
+
+// Transaction failure
+{
+  success: false,
+  platform: "discord",
+  userId: "123456789",
+  error: "Transaction failed: insufficient funds"
+}
+```
